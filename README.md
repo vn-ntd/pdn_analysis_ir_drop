@@ -142,8 +142,8 @@ pdn_analysis/
 Yêu cầu Python 3.9 trở lên. Cài đặt các thư viện phụ thuộc:
 
 ```bash
-git clone https://github.com/<your-username>/pdn-analysis-ir-drop.git
-cd pdn-analysis-ir-drop
+git clone https://github.com/vn-ntd/pdn_analysis_ir_drop.git
+cd pdn_analysis_ir_drop
 pip install -r requirements.txt
 ```
 
