@@ -2,7 +2,8 @@
 
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Tests: Passing](https://img.shields.io/badge/tests-13%20passed-brightgreen.svg)]()
+[![CI](https://github.com/vn-ntd/pdn_analysis_ir_drop/actions/workflows/ci.yml/badge.svg)](https://github.com/vn-ntd/pdn_analysis_ir_drop/actions/workflows/ci.yml)
+[![Tests: Passing](https://img.shields.io/badge/tests-35%20passed-brightgreen.svg)]()
 [![EDA: PDN CAD](https://img.shields.io/badge/EDA-Physical%20Design%20CAD-orange.svg)]()
 
 > **Thiết kế và Đánh giá Mạng Lưới Phân Phối Nguồn (Power Distribution Network - PDN)**  
@@ -153,20 +154,35 @@ pip install -e .
 ```
 
 ### 2. Chạy Bộ Kiểm Thử (Unit Tests)
-Chạy toàn bộ 13 bài kiểm thử đơn vị:
+Chạy toàn bộ 35 bài kiểm thử đơn vị:
 ```bash
 python -m unittest discover tests -v
 ```
 
-### 3. Chạy Toàn Bộ Kịch Bản Nghiên Cứu PDN
+### 3. Chạy Toàn Bộ Kịch Bản Nghiên Cứu PDN (Hỗ trợ CLI)
 Chạy tính toán giải tích, mô phỏng số MNA cho 4 cấu hình lưới, quét đường cong Pareto và xuất biểu đồ:
 ```bash
+# Chạy với tham số mặc định (600µm chip, 800ps transient)
 python simulations/run_pdn_study.py
+
+# Hoặc tùy biến thông qua tham số dòng lệnh (CLI):
+python simulations/run_pdn_study.py \
+  --chip-size 600.0 \
+  --background-power 0.7 \
+  --duration-ps 800.0 \
+  --dt-ps 5.0 \
+  --output-dir ./output \
+  --no-plots \
+  --quiet
 ```
 
 ### 4. Tái Tạo Dashboard Tương Tác
 ```bash
+# Tạo dashboard mặc định
 python dashboard/generate_ui.py
+
+# Hoặc chỉ định đường dẫn dữ liệu và file xuất ra:
+python dashboard/generate_ui.py --json-path ./output/pdn_results.json --output ./dashboard/pdn_dashboard.html
 ```
 
 ---
