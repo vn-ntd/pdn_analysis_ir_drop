@@ -3,7 +3,7 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/vn-ntd/pdn_analysis_ir_drop/actions/workflows/ci.yml/badge.svg)](https://github.com/vn-ntd/pdn_analysis_ir_drop/actions/workflows/ci.yml)
-[![Tests: Passing](https://img.shields.io/badge/tests-35%20passed-brightgreen.svg)]()
+[![Tests: Passing](https://img.shields.io/badge/tests-35%20passed-brightgreen.svg)](tests/)
 [![EDA: PDN CAD](https://img.shields.io/badge/EDA-Physical%20Design%20CAD-orange.svg)]()
 
 > **Thiết kế và Đánh giá Mạng Lưới Phân Phối Nguồn (Power Distribution Network - PDN)**  
@@ -81,11 +81,30 @@ Mô phỏng MNA số học được thực hiện trên vi mạch $600\,\mu\text
 | **Khoảng cách C4 Bumps** | $\le 150\,\mu\text{m}$ | $150\,\mu\text{m}$ | $100\,\mu\text{m}$ | $120\,\mu\text{m}$ | $120\,\mu\text{m}$ |
 | **Phân bổ Tụ Decap** | - | $5\text{ nF/mm}^2$ | $25\text{ nF/mm}^2$ | $15\text{ nF/mm}^2$ | $12\text{ nF} + 8\text{ nF (Cục bộ)}$ |
 | **Peak Static IR Drop** | **$\le 20.0\text{ mV}$** | **$22.82\text{ mV}$** ❌ *(Vi phạm)* | $1.71\text{ mV}$ ✅ | $4.44\text{ mV}$ ✅ | $4.06\text{ mV}$ ✅ |
-| **Peak Dynamic IR Drop** | **$\le 40.0\text{ mV}$** | **$77.81\text{ mV}$** ❌ *(Trượt 9.7%)*| $6.07\text{ mV}$ ✅ | $15.46\text{ mV}$ ✅ | **$8.83\text{ mV}$** ✅ *(Rất êm)* |
+| **Peak Dynamic IR Drop** | **$\le 40.0\text{ mV}$** | **$77.81\text{ mV}$** ❌ *(Sụt 9.73% $V_{DD}$, vượt +94.5%)*| $6.07\text{ mV}$ ✅ | $15.46\text{ mV}$ ✅ | **$8.83\text{ mV}$** ✅ *(Rất êm)* |
 | **Độ Vọt Sụt Áp Động** | - | $55.00\text{ mV}$ | $4.35\text{ mV}$ | $11.02\text{ mV}$ | **$4.78\text{ mV}$** *(Giảm 57%)* |
 | **Chiếm Dụng Kim Loại ($\eta$)**| **$\le 20.0\%$** | $2.7\%$ | **$27.5\%$** ❌ *(Nghẽn routing)*| $11.8\%$ ✅ | $14.0\%$ ✅ |
-| **Lỗi Electromigration** | **0 lỗi** | **130 nhánh vi phạm** ❌ | 0 vi phạm ✅ | Cần tăng via C4 | Cần tăng via C4 |
-| **Đánh Giá Khả Thi** | - | **Thất Bại** | **Bị Loại (Nghẽn)** | **Tối Ưu Nền Tảng** | **Tốt Nhất Cho SoC/AI** |
+| **Lỗi Electromigration** | **0 lỗi** | **130 nhánh vi phạm** ❌ | 0 vi phạm ✅ | Pass (Đã tăng via C4) ✅ | Pass (Đã tăng via C4) ✅ |
+| **Đánh Giá Khả Thi** | - | **Thất Bại (Trượt IR & EM)** | **Bị Loại (Nghẽn dây)** | **Tối Ưu Nền Tảng** | **Tốt Nhất & Khả Thi Toàn Diện** |
+
+> [!NOTE]
+> **Giải Thích Độ Vượt Dynamic IR-Drop (Topology A):**  
+> Mức sụt áp động $77.81\text{ mV}$ trên Topology A chiếm **$9.73\%\ V_{DD}$** (chuẩn $V_{DD} = 0.8\text{V}$), vượt quá ngân sách cho phép $40.0\text{ mV}$ ($5.0\%\ V_{DD}$) một khoảng tương đối là:
+> $$\frac{77.81\text{ mV} - 40.0\text{ mV}}{40.0\text{ mV}} \times 100\% = \mathbf{+94.53\%}$$
+> Gây nguy cơ lỗi chức năng nghiêm trọng (timing glitch / functional failure).
+
+---
+
+## ⚙️ Giả Định Thiết Kế & Phạm Vi Mô Phỏng (Design Assumptions)
+
+Để mô phỏng chính xác lưới điện cho chip SoC/AI hiệu năng cao:
+- **Tiến trình FinFET:** Giả định tương đương node công nghệ **7nm FinFET** với điện áp danh định $V_{DD} = 0.8\text{ V}$.
+- **Ngân sách thiết kế IR-Drop:**
+  - Ngưỡng Static IR-Drop tối đa: $\le 20.0\text{ mV}$ ($2.5\%\ V_{DD}$).
+  - Ngưỡng Dynamic IR-Drop tối đa: $\le 40.0\text{ mV}$ ($5.0\%\ V_{DD}$).
+- **Metal Stack & Điện trở:** Mô hình hóa 9 lớp kim loại (M1-M9) với điện trở mặt phẳng $R_{sq}$ và điện dung ký sinh chuẩn hóa trong `core/technology_specs.py`.
+- **Giới hạn Electromigration (EM):** Mật độ dòng cực đại an toàn $J_{max} \approx 1.5 - 2.5\text{ mA}/\mu\text{m}^2$.
+- **Hotspot Power Density:** Mô phỏng vi mạch $600\,\mu\text{m} \times 600\,\mu\text{m}$ gồm Core ALU ($3.2\text{ W/mm}^2$) và NPU ($2.8\text{ W/mm}^2$) chuyển mạch đồng thời tại sườn xung nhịp.
 
 ---
 
