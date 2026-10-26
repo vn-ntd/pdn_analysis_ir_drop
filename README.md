@@ -3,11 +3,11 @@
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![CI](https://github.com/vn-ntd/pdn_analysis_ir_drop/actions/workflows/ci.yml/badge.svg)](https://github.com/vn-ntd/pdn_analysis_ir_drop/actions/workflows/ci.yml)
-[![Tests: Passing](https://img.shields.io/badge/tests-35%20passed-brightgreen.svg)](tests/)
+[![Tests: Passing](https://img.shields.io/badge/tests-46%20passed-brightgreen.svg)](tests/)
 [![EDA: PDN CAD](https://img.shields.io/badge/EDA-Physical%20Design%20CAD-orange.svg)]()
 
 > **Thiết kế và Đánh giá Mạng Lưới Phân Phối Nguồn (Power Distribution Network - PDN)**  
-> Tính toán bề rộng dây nguồn (stripe/rail width & pitch), kiểm soát quá dòng điện và hiện tượng di chuyển điện tử (**Electromigration - EM**), mô phỏng sụt áp tĩnh (**Static IR-Drop**) và sụt áp động (**Dynamic IR-Drop**) bằng **Modified Nodal Analysis (MNA)**, và tối ưu hóa thỏa hiệp giữa sụt áp và tắc nghẽn định tuyến kim loại (**Pareto Frontier**).
+> Tính toán bề rộng dây nguồn (stripe/rail width & pitch), kiểm soát quá dòng điện và hiện tượng di chuyển điện tử (**Electromigration - EM**), mô phỏng sụt áp tĩnh (**Static IR-Drop**) và sụt áp động (**Dynamic IR-Drop**) bằng **Modified Nodal Analysis (MNA)**, phân tích phổ trở kháng miền tần số (**Target Impedance $Z(f)$**), và tối ưu hóa thỏa hiệp giữa sụt áp và tắc nghẽn định tuyến kim loại (**Pareto Frontier**).
 
 ---
 
@@ -31,7 +31,7 @@ Trong các tiến trình FinFET hiện đại ($7\text{nm}/5\text{nm}$), điện
 - **Electromigration (EM):** Dòng điện mật độ cao làm bật các ion kim loại Cu, tạo lỗ thủng (voids) làm đứt mạch hoặc tụ đống (hillocks) làm chập mạch theo thời gian.
 - **Routing Congestion:** Nếu dây nguồn quá dày, nó sẽ khóa cứng (block) các lớp kim loại cấp cao, làm bộ định tuyến tín hiệu (Signal router) không còn không gian đi dây.
 
-Dự án này cung cấp một bộ công cụ hoàn chỉnh từ tính toán giải tích đến mô phỏng số học giải hệ phương trình thưa MNA, kiểm tra EM và tối ưu hóa đa mục tiêu.
+Dự án này cung cấp một bộ công cụ hoàn chỉnh từ tính toán giải tích đến mô phỏng số học giải hệ phương trình thưa MNA, kiểm tra EM, phân tích trở kháng $Z(f)$ và tối ưu hóa đa mục tiêu.
 
 ---
 
@@ -50,13 +50,13 @@ Trong đó $t$ là độ dày kim loại, $I_{branch}$ là dòng điện chạy 
 Xét dây nguồn dài $L$ (khoảng cách giữa hai C4 bumps hoặc straps trực giao), bước dây $P$ (pitch), điện trở mặt phẳng $R_{sq}$ ($\Omega/\square$), cấp nguồn cho mật độ công suất $P_{density}$ ($J_{area} = \frac{P_{density}}{V_{DD}}$):
 - Dòng điện phụ trách: $I_{stripe} = J_{area} \cdot P \cdot L$
 - Điện trở dây: $R_{stripe} = R_{sq} \cdot \frac{L}{w}$
-- Phân bố điện áp dọc theo dây giải từ $\frac{d^2 V}{dx^2} = r \cdot j$ với điều kiện biên hai đầu $V(0) = V(L) = V_{DD}$. Độ sụt áp cực đại tại trung điểm $x = L/2$:
-
-$$\Delta V_{static} = \frac{1}{8} \cdot I_{stripe} \cdot R_{stripe} = \frac{1}{8} \cdot \frac{R_{sq} \cdot J_{area} \cdot P \cdot L^2}{w}$$
+- Phân bố điện áp dọc theo dây giải từ $\frac{d^2 V}{dx^2} = r \cdot j$.
+  - Cấp nguồn 2 đầu (`both_ends`): $\Delta V_{static} = \frac{1}{8} I_{stripe} R_{stripe}$
+  - Cấp nguồn 1 đầu (`single_end`): $\Delta V_{static} = \frac{1}{2} I_{stripe} R_{stripe}$
 
 Bề rộng dây tối thiểu để đạt ngân sách sụt áp tĩnh $\Delta V_{target}$:
 
-$$w_{IR} \ge \frac{R_{sq} \cdot J_{area} \cdot P \cdot L^2}{8 \cdot \Delta V_{target}}$$
+$$w_{IR} \ge \gamma \cdot \frac{R_{sq} \cdot J_{area} \cdot P \cdot L^2}{\Delta V_{target}} \quad (\gamma = 1/8 \text{ hoặc } 1/2)$$
 
 Hệ số chiếm dụng định tuyến (Routing Blockage / Utilization):
 
@@ -68,6 +68,17 @@ $$\eta = \frac{w}{P}$$
 Khi chuyển mạch đồng thời tại sườn xung nhịp, dòng đỉnh đạt $I_{peak} \approx 3\times - 5\times I_{DC}$. Bù đắp sụt áp cảm ứng package $L_{eff} \cdot \frac{di}{dt}$ và cung cấp điện tích tức thời $Q_{transient}$:
 
 $$C_{decap, min} \ge \frac{Q_{transient}}{\Delta V_{dyn, target} - L_{eff} \frac{\Delta I}{t_{rise}}} \approx \frac{\frac{1}{2} (I_{peak} - I_{DC}) \cdot t_{switch}}{\Delta V_{dyn, target} - \left(\frac{L_{bump}}{N_{bumps}}\right) \frac{\Delta I}{t_{rise}}}$$
+
+---
+
+### 4. Trở Kháng Mục Tiêu PDN (Target Impedance & Frequency Domain)
+Để đảm bảo điện áp nguồn ổn định trên toàn dải tần số hoạt động ($10\text{ kHz} - 5\text{ GHz}$), trở kháng lưới điện $Z_{PDN}(f)$ phải nằm dưới trở kháng mục tiêu:
+
+$$Z_{target} = \frac{V_{DD} \cdot \text{Ripple}_{\%}}{\Delta I_{transient}}$$
+
+Tần số phản cộng hưởng LC (Anti-resonance peak) giữa điện cảm package và tụ Decap trên chip:
+
+$$f_{res} \approx \frac{1}{2\pi \sqrt{L_{eff} \cdot C_{decap}}}$$
 
 ---
 
@@ -86,25 +97,6 @@ Mô phỏng MNA số học được thực hiện trên vi mạch $600\,\mu\text
 | **Chiếm Dụng Kim Loại ($\eta$)**| **$\le 20.0\%$** | $2.7\%$ | **$27.5\%$** ❌ *(Nghẽn routing)*| $11.8\%$ ✅ | $14.0\%$ ✅ |
 | **Lỗi Electromigration** | **0 lỗi** | **130 nhánh vi phạm** ❌ | 0 vi phạm ✅ | Pass (Đã tăng via C4) ✅ | Pass (Đã tăng via C4) ✅ |
 | **Đánh Giá Khả Thi** | - | **Thất Bại (Trượt IR & EM)** | **Bị Loại (Nghẽn dây)** | **Tối Ưu Nền Tảng** | **Tốt Nhất & Khả Thi Toàn Diện** |
-
-> [!NOTE]
-> **Giải Thích Độ Vượt Dynamic IR-Drop (Topology A):**  
-> Mức sụt áp động $77.81\text{ mV}$ trên Topology A chiếm **$9.73\%\ V_{DD}$** (chuẩn $V_{DD} = 0.8\text{V}$), vượt quá ngân sách cho phép $40.0\text{ mV}$ ($5.0\%\ V_{DD}$) một khoảng tương đối là:
-> $$\frac{77.81\text{ mV} - 40.0\text{ mV}}{40.0\text{ mV}} \times 100\% = \mathbf{+94.53\%}$$
-> Gây nguy cơ lỗi chức năng nghiêm trọng (timing glitch / functional failure).
-
----
-
-## ⚙️ Giả Định Thiết Kế & Phạm Vi Mô Phỏng (Design Assumptions)
-
-Để mô phỏng chính xác lưới điện cho chip SoC/AI hiệu năng cao:
-- **Tiến trình FinFET:** Giả định tương đương node công nghệ **7nm FinFET** với điện áp danh định $V_{DD} = 0.8\text{ V}$.
-- **Ngân sách thiết kế IR-Drop:**
-  - Ngưỡng Static IR-Drop tối đa: $\le 20.0\text{ mV}$ ($2.5\%\ V_{DD}$).
-  - Ngưỡng Dynamic IR-Drop tối đa: $\le 40.0\text{ mV}$ ($5.0\%\ V_{DD}$).
-- **Metal Stack & Điện trở:** Mô hình hóa 9 lớp kim loại (M1-M9) với điện trở mặt phẳng $R_{sq}$ và điện dung ký sinh chuẩn hóa trong `core/technology_specs.py`.
-- **Giới hạn Electromigration (EM):** Mật độ dòng cực đại an toàn $J_{max} \approx 1.5 - 2.5\text{ mA}/\mu\text{m}^2$.
-- **Hotspot Power Density:** Mô phỏng vi mạch $600\,\mu\text{m} \times 600\,\mu\text{m}$ gồm Core ALU ($3.2\text{ W/mm}^2$) và NPU ($2.8\text{ W/mm}^2$) chuyển mạch đồng thời tại sườn xung nhịp.
 
 ---
 
@@ -132,24 +124,29 @@ pdn_analysis/
 │   ├── __init__.py
 │   ├── technology_specs.py      # Định nghĩa metal stack 7nm FinFET (M1-M9, vias, sheet res)
 │   ├── analytical_sizing.py     # Công thức giải tích EM, Static IR & Decap sizing
+│   ├── impedance_analyzer.py    # Phân tích phổ trở kháng PDN Z(f) & Larry Smith Target Z
 │   ├── mna_mesh_solver.py       # Bộ giải ma trận thưa MNA (Static & Dynamic Transient)
 │   └── optimizer.py             # Bộ quét thông số tìm điểm tối ưu Pareto
 ├── simulations/                 # Kịch bản mô phỏng
 │   ├── __init__.py
 │   └── run_pdn_study.py         # Chạy toàn bộ nghiên cứu & xuất biểu đồ
-├── tests/                       # Bộ kiểm thử đơn vị tự động (Unit Tests)
+├── tests/                       # Bộ kiểm thử đơn vị tự động (Unit Tests - 46 tests)
 │   ├── __init__.py
 │   ├── test_analytical_sizing.py
+│   ├── test_cli_args.py
+│   ├── test_impedance_analyzer.py
 │   ├── test_mna_solver.py
 │   └── test_optimizer.py
+├── notebooks/                   # Jupyter Notebook hướng dẫn tương tác
+│   └── pdn_tutorial.ipynb       # Tutorial trực quan từng bước
 ├── dashboard/                   # Giao diện trực quan tương tác (Generative UI)
 │   ├── generate_ui.py           # Script sinh HTML dashboard
 │   └── pdn_dashboard.html       # File HTML giao diện tương tác độc lập
-├── docs/                        # Tài liệu kỹ thuật & hình ảnh
-│   └── images/                  # Các hình ảnh biểu đồ độ phân giải cao
+├── docs/images/                 # Các hình ảnh biểu đồ độ phân giải cao
 ├── output/                      # Dữ liệu JSON & plots sau khi mô phỏng
+├── pyproject.toml               # Cấu hình đóng gói chuẩn PEP 517/621 & CLI scripts
 ├── requirements.txt             # Thư viện phụ thuộc
-├── setup.py                     # Cấu hình cài đặt gói pip
+├── setup.py                     # Cài đặt gói tương thích ngược
 ├── LICENSE                      # Giấy phép MIT
 └── README.md                    # Tài liệu hướng dẫn
 ```
@@ -159,33 +156,29 @@ pdn_analysis/
 ## 🚀 Cài Đặt & Hướng Dẫn Chạy
 
 ### 1. Cài Đặt Môi Trường
-Yêu cầu Python 3.9 trở lên. Cài đặt các thư viện phụ thuộc:
+Yêu cầu Python 3.9 trở lên. Cài đặt dưới dạng editable package:
 
 ```bash
 git clone https://github.com/vn-ntd/pdn_analysis_ir_drop.git
 cd pdn_analysis_ir_drop
-pip install -r requirements.txt
-```
-
-Hoặc cài đặt dưới dạng editable package:
-```bash
 pip install -e .
 ```
 
-### 2. Chạy Bộ Kiểm Thử (Unit Tests)
-Chạy toàn bộ 35 bài kiểm thử đơn vị:
+### 2. Chạy Toàn Bộ Unit Tests (46 Tests, 99% Coverage)
 ```bash
-python -m unittest discover tests -v
+pytest tests/ -v
+# Hoặc kiểm tra coverage chi tiết:
+pytest tests/ -v --cov=core --cov-report=term-missing
 ```
 
 ### 3. Chạy Toàn Bộ Kịch Bản Nghiên Cứu PDN (Hỗ trợ CLI)
-Chạy tính toán giải tích, mô phỏng số MNA cho 4 cấu hình lưới, quét đường cong Pareto và xuất biểu đồ:
+Sau khi cài đặt package, bạn có thể chạy trực tiếp lệnh `pdn-study`:
 ```bash
 # Chạy với tham số mặc định (600µm chip, 800ps transient)
-python simulations/run_pdn_study.py
+pdn-study
 
 # Hoặc tùy biến thông qua tham số dòng lệnh (CLI):
-python simulations/run_pdn_study.py \
+pdn-study \
   --chip-size 600.0 \
   --background-power 0.7 \
   --duration-ps 800.0 \
@@ -198,10 +191,10 @@ python simulations/run_pdn_study.py \
 ### 4. Tái Tạo Dashboard Tương Tác
 ```bash
 # Tạo dashboard mặc định
-python dashboard/generate_ui.py
+pdn-dashboard
 
 # Hoặc chỉ định đường dẫn dữ liệu và file xuất ra:
-python dashboard/generate_ui.py --json-path ./output/pdn_results.json --output ./dashboard/pdn_dashboard.html
+pdn-dashboard --json-path ./output/pdn_results.json --output ./dashboard/pdn_dashboard.html
 ```
 
 ---

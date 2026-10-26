@@ -3,7 +3,8 @@ Technology Specifications for Advanced Node Power Distribution Network (PDN).
 Parameters calibrated for representative 7nm/16nm FinFET digital SoC.
 """
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Optional
+
 
 @dataclass
 class MetalLayerSpec:
@@ -17,11 +18,13 @@ class MetalLayerSpec:
     j_max_dc: float         # Max DC current density (mA/um^2) for EM
     j_max_rms: float        # Max RMS current density (mA/um^2) for EM
 
+
 @dataclass
 class ViaSpec:
     name: str
     resistance_per_cut: float # Ohms per single via cut
     cut_size: float           # um
+
 
 @dataclass
 class TechnologyConfig:
@@ -32,8 +35,8 @@ class TechnologyConfig:
     temp_celsius: float = 105.0 # Operating junction temperature for EM
 
     # Metal Stack (Simplified PDN layers)
-    layers: Dict[str, MetalLayerSpec] = None
-    vias: Dict[str, ViaSpec] = None
+    layers: Optional[Dict[str, MetalLayerSpec]] = None
+    vias: Optional[Dict[str, ViaSpec]] = None
 
     def __post_init__(self):
         if self.layers is None:
@@ -112,3 +115,12 @@ class TechnologyConfig:
     @property
     def dynamic_ir_budget_volts(self) -> float:
         return self.nominal_vdd * self.ir_drop_budget_dynamic_pct
+
+    def get_via_array_resistance(self, via_name: str, num_cuts: int) -> float:
+        """
+        Calculates equivalent resistance of a parallel array of via cuts:
+          R_array = R_cut / num_cuts
+        """
+        if self.vias is None or via_name not in self.vias or num_cuts <= 0:
+            return 0.0
+        return self.vias[via_name].resistance_per_cut / float(num_cuts)

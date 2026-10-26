@@ -4,6 +4,7 @@ Performs:
 1. Static IR-Drop 2D/Multi-layer Mesh Simulation (Sparse linear system G * V = I).
 2. Dynamic IR-Drop Transient Simulation with Backward Euler and Decap charge-reservoir modeling.
 3. Branch Current & Electromigration (EM) Current Density verification.
+4. Support for Via array contact resistance (ViaSpec) between bumps and metal mesh.
 
 Fixes applied (v1.1.0):
   - [C3] Boundary correction now uses exact area fractions: 0.25 for corners,
@@ -15,11 +16,13 @@ Fixes applied (v1.1.0):
   - [M5] Hotspot current assignment vectorized with numpy boolean indexing.
   - [MIN3] Grid coordinates use np.linspace for exact floating-point spacing.
 """
+from dataclasses import dataclass, field
+from typing import List, Tuple
+
 import numpy as np
 import scipy.sparse as sp
 import scipy.sparse.linalg as spla
-from dataclasses import dataclass, field
-from typing import List, Tuple, Dict, Optional
+
 from core.technology_specs import TechnologyConfig
 
 
@@ -54,6 +57,8 @@ class GridConfig:
     bump_pitch_um: float = 120.0
     bump_resistance_ohm: float = 0.025  # 25 mOhm per bump pad
     bump_offset_um: float = 30.0
+    bump_via_layer: str = "Via8"
+    bump_num_via_cuts: int = 0  # 0: raw bump resistance, >0: includes parallel via cuts
 
     # Power loading
     background_power_w_per_mm2: float = 0.8
@@ -62,6 +67,29 @@ class GridConfig:
     # Decoupling capacitance
     uniform_decap_nf_per_mm2: float = 12.0  # Standard cell fill decaps
     hotspot_extra_decap_nf: float = 0.0
+
+    def __post_init__(self) -> None:
+        """Validate physical parameters of the PDN mesh configuration."""
+        if self.chip_width_um <= 0 or self.chip_height_um <= 0:
+            raise ValueError(
+                f"Chip dimensions must be positive: got width={self.chip_width_um}, height={self.chip_height_um}"
+            )
+        if self.h_width_um <= 0 or self.v_width_um <= 0:
+            raise ValueError(
+                f"Stripe widths must be positive: got h_width={self.h_width_um}, v_width={self.v_width_um}"
+            )
+        if self.h_pitch_um <= self.h_width_um:
+            raise ValueError(
+                f"h_pitch ({self.h_pitch_um}) must be strictly greater than h_width ({self.h_width_um})"
+            )
+        if self.v_pitch_um <= self.v_width_um:
+            raise ValueError(
+                f"v_pitch ({self.v_pitch_um}) must be strictly greater than v_width ({self.v_width_um})"
+            )
+        if self.bump_pitch_um <= 0:
+            raise ValueError(f"bump_pitch must be positive: got {self.bump_pitch_um}")
+        if self.bump_resistance_ohm <= 0:
+            raise ValueError(f"bump_resistance must be positive: got {self.bump_resistance_ohm}")
 
 
 @dataclass
@@ -118,6 +146,12 @@ class MNAPowerGridSolver:
         self.r_h = self.h_spec.sheet_resistance * (self.config.v_pitch_um / self.config.h_width_um)
         # Vertical branch: length = delta_y = h_pitch, width = v_width
         self.r_v = self.v_spec.sheet_resistance * (self.config.h_pitch_um / self.config.v_width_um)
+
+        # Effective bump connection resistance (bump pad + optional parallel via array)
+        via_r = self.tech.get_via_array_resistance(
+            self.config.bump_via_layer, self.config.bump_num_via_cuts
+        )
+        self.effective_bump_resistance_ohm = self.config.bump_resistance_ohm + via_r
 
         # Metal utilizations
         self.util_h = (self.config.h_width_um / self.config.h_pitch_um) * 100.0
@@ -203,7 +237,7 @@ class MNAPowerGridSolver:
         # Conductances
         g_h = 1.0 / self.r_h
         g_v = 1.0 / self.r_v
-        g_bump = 1.0 / self.config.bump_resistance_ohm
+        g_bump = 1.0 / self.effective_bump_resistance_ohm
 
         bump_mask = self._get_bump_mask()
         node_currents = self._calculate_node_currents()
@@ -377,8 +411,8 @@ class MNAPowerGridSolver:
 
         c_mat = sp.diags(c_diag, format="csr")
 
-        # Time stepping setup
-        time_steps = int(duration_ps / dt_ps)
+        # Time stepping setup (exact dt_ps grid points: 0, dt, 2*dt, ..., duration)
+        time_steps = int(round(duration_ps / dt_ps)) + 1
         t_vec = np.linspace(0, duration_ps, time_steps)
         dt_s = dt_ps * 1e-12
 
@@ -397,7 +431,8 @@ class MNAPowerGridSolver:
         worst_ir_wave = np.zeros(time_steps)
 
         v_curr = v_dc.copy()
-        g_bump = 1.0 / self.config.bump_resistance_ohm
+        v_min_nodes = v_dc.copy()
+        g_bump = 1.0 / self.effective_bump_resistance_ohm
 
         # --- Pre-compute bump RHS vector (FIX M2) ---
         # b_bump is constant across all timesteps: only load current changes
@@ -436,6 +471,9 @@ class MNAPowerGridSolver:
             # Solve next voltage state using pre-factorized LU
             v_curr = lu_solver(rhs)
 
+            # Track minimum voltage achieved at each node
+            v_min_nodes = np.minimum(v_min_nodes, v_curr)
+
             worst_v_wave[step] = v_curr[worst_idx]
             worst_ir_wave[step] = (self.tech.nominal_vdd - v_curr[worst_idx]) * 1e3
 
@@ -443,9 +481,9 @@ class MNAPowerGridSolver:
         peak_static_drop = float(ir_dc[worst_idx])
         overshoot = peak_dyn_drop - peak_static_drop
 
-        # Transient charge supplied by decaps (approximation from voltage swing)
-        total_decap_f = float(np.sum(c_diag))
-        charge_pc = total_decap_f * max(0.0, overshoot * 1e-3) * 1e12
+        # Transient charge supplied by decaps (sum of C_k * Delta_V_k across all nodes)
+        local_droops = np.maximum(0.0, v_dc - v_min_nodes)
+        charge_pc = float(np.sum(c_diag * local_droops)) * 1e12
 
         return DynamicSimulationResult(
             time_ps=t_vec,

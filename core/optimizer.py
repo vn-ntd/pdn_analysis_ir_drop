@@ -3,11 +3,12 @@ PDN Parameter Optimizer & Trade-Off Explorer.
 Explores the Pareto frontier between IR-drop, Electromigration margins,
 and Metal Layer Routing Blockage (Utilization).
 """
-import numpy as np
 from dataclasses import dataclass
-from typing import List, Dict, Tuple, Optional
+from typing import List, Optional
+
+from core.mna_mesh_solver import GridConfig, MNAPowerGridSolver
 from core.technology_specs import TechnologyConfig
-from core.mna_mesh_solver import MNAPowerGridSolver, GridConfig, PowerHotspot
+
 
 @dataclass
 class OptimizationPoint:
@@ -42,12 +43,12 @@ class PDNOptimizer:
         """
         results: List[OptimizationPoint] = []
         static_budget_mv = self.tech.static_ir_budget_volts * 1e3
-        
+
         for p in pitches:
             for w in widths:
                 if w >= p * 0.45: # Filter out physically absurd or DRC violating widths (>45% blockage)
                     continue
-                    
+
                 cfg = GridConfig(
                     chip_width_um=self.base_config.chip_width_um,
                     chip_height_um=self.base_config.chip_height_um,
@@ -63,21 +64,21 @@ class PDNOptimizer:
                     hotspots=self.base_config.hotspots,
                     uniform_decap_nf_per_mm2=self.base_config.uniform_decap_nf_per_mm2
                 )
-                
+
                 solver = MNAPowerGridSolver(self.tech, cfg)
                 res = solver.solve_static()
-                
+
                 util_avg = (res.metal_utilization_h_pct + res.metal_utilization_v_pct) / 2.0
                 ir_ok = (res.max_ir_drop_mv <= static_budget_mv)
                 em_ok = (res.em_violation_count == 0)
                 util_ok = (util_avg <= max_allowed_utilization_pct)
-                
+
                 # Figure of Merit: penalize IR drop, high metal blockage, and heavy penalty for EM violations
                 # Lower score is better
                 ir_penalty = max(0.0, res.max_ir_drop_mv - static_budget_mv) * 10.0
                 em_penalty = res.em_violation_count * 1000.0
                 fom = res.max_ir_drop_mv * 1.0 + util_avg * 1.5 + ir_penalty + em_penalty
-                
+
                 pt = OptimizationPoint(
                     h_width_um=w,
                     h_pitch_um=p,
@@ -94,7 +95,7 @@ class PDNOptimizer:
                     figure_of_merit=fom
                 )
                 results.append(pt)
-                
+
         # Sort by figure of merit
         results.sort(key=lambda x: x.figure_of_merit)
         return results
@@ -111,13 +112,13 @@ class PDNOptimizer:
             pt for pt in sweep_results
             if pt.is_ir_compliant and pt.is_em_compliant and pt.is_utilization_compliant
         ]
-        
+
         if not compliant:
             # If none compliant with strict util, pick best compliant with IR & EM
             relaxed = [pt for pt in sweep_results if pt.is_ir_compliant and pt.is_em_compliant]
             if relaxed:
                 return min(relaxed, key=lambda x: x.metal_utilization_avg_pct)
             return sweep_results[0] if sweep_results else None
-            
+
         # Select one with lowest metal utilization among compliant
         return min(compliant, key=lambda x: (x.metal_utilization_avg_pct, x.max_static_ir_drop_mv))

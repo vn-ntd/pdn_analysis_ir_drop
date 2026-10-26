@@ -18,12 +18,13 @@ CLI Usage (FIX M7):
     --no-plots              Skip matplotlib plot generation
     --quiet                 Suppress verbose console output
 """
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
-import numpy as np
 from typing import Dict, Tuple  # FIX C4: explicit import
+
+import numpy as np
 
 # Ensure project root is in sys.path for editable and direct-run modes
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -37,21 +38,19 @@ if hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
+import matplotlib  # noqa: E402
 
-from core.technology_specs import TechnologyConfig
-from core.analytical_sizing import PDNAnalyticalSizer
-from core.mna_mesh_solver import (
-    MNAPowerGridSolver,
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
+
+from core.analytical_sizing import PDNAnalyticalSizer  # noqa: E402
+from core.mna_mesh_solver import (  # noqa: E402
     GridConfig,
+    MNAPowerGridSolver,
     PowerHotspot,
-    StaticSimulationResult,
-    DynamicSimulationResult,
 )
-from core.optimizer import PDNOptimizer
+from core.optimizer import PDNOptimizer  # noqa: E402
+from core.technology_specs import TechnologyConfig  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -147,7 +146,7 @@ def run_study(args: argparse.Namespace) -> None:
         target_ir_drop_v=0.008,
     )
     if verbose:
-        print(f"M1 Power Rail (span=10um, pitch=0.64um):")
+        print("M1 Power Rail (span=10um, pitch=0.64um):")
         print(f"  - Target IR Drop: {m1_sizing.target_ir_drop_v*1e3:.1f} mV")
         print(f"  - Minimum W (IR Drop): {m1_sizing.w_min_ir_um*1e3:.1f} nm")
         print(f"  - Minimum W (EM):      {m1_sizing.w_min_em_um*1e3:.1f} nm")
@@ -163,7 +162,7 @@ def run_study(args: argparse.Namespace) -> None:
         target_ir_drop_v=0.010,
     )
     if verbose:
-        print(f"\nM4 Intermediate Stripe (span=50um, pitch=8.0um):")
+        print("\nM4 Intermediate Stripe (span=50um, pitch=8.0um):")
         print(f"  - Minimum W (IR):      {m4_sizing.w_min_ir_um:.3f} um")
         print(f"  - Recommended Width:   {m4_sizing.recommended_width_um:.3f} um")
         print(f"  - Metal Blockage:      {m4_sizing.metal_utilization_pct:.1f}%")
@@ -177,7 +176,7 @@ def run_study(args: argparse.Namespace) -> None:
         target_ir_drop_v=0.012,
     )
     if verbose:
-        print(f"\nM8 Global Power Strap (span=120um, pitch=30um):")
+        print("\nM8 Global Power Strap (span=120um, pitch=30um):")
         print(f"  - Minimum W (IR):      {m8_sizing.w_min_ir_um:.2f} um")
         print(f"  - Recommended Width:   {m8_sizing.recommended_width_um:.2f} um")
         print(f"  - Metal Blockage:      {m8_sizing.metal_utilization_pct:.1f}%")
@@ -193,7 +192,7 @@ def run_study(args: argparse.Namespace) -> None:
         rise_time_ps=100.0,
     )
     if verbose:
-        print(f"\nDecoupling Capacitance (Decap) Sizing:")
+        print("\nDecoupling Capacitance (Decap) Sizing:")
         print(f"  - Delta I Transient:   {decap_calc['delta_i_peak_a']:.2f} A")
         print(f"  - L*di/dt Package:     {decap_calc['v_inductive_drop_mv']:.2f} mV")
         print(f"  - Required Decap:      {decap_calc['c_decap_required_nf']:.2f} nF")
@@ -353,7 +352,7 @@ def run_study(args: argparse.Namespace) -> None:
     if verbose:
         print(f"Swept {len(sweep_points)} design configurations.")
         if optimal_pt:
-            print(f"Optimal Pareto Design Point:")
+            print("Optimal Pareto Design Point:")
             print(f"  - Width: {optimal_pt.h_width_um:.1f} um, Pitch: {optimal_pt.h_pitch_um:.1f} um")
             print(f"  - Metal Blockage: {optimal_pt.metal_utilization_avg_pct:.1f}%")
             print(f"  - Max IR Drop:    {optimal_pt.max_static_ir_drop_mv:.2f} mV")
@@ -583,6 +582,21 @@ def run_study(args: argparse.Namespace) -> None:
             "dynamic_budget_mv": tech.dynamic_ir_budget_volts * 1e3,
             "temp_c": tech.temp_celsius,
         },
+        "floorplan": {
+            "chip_size_um": chip_size,
+            "hotspots": [
+                {
+                    "name": hs.name,
+                    "x_min_um": hs.x_min_um,
+                    "x_max_um": hs.x_max_um,
+                    "y_min_um": hs.y_min_um,
+                    "y_max_um": hs.y_max_um,
+                    "power_density_w_per_mm2": hs.power_density_w_per_mm2,
+                    "dynamic_peak_factor": hs.dynamic_peak_factor,
+                }
+                for hs in hotspots
+            ],
+        },
         "analytical_sizing": {
             "m1": {
                 "layer": "M1 Power Rail",
@@ -675,5 +689,10 @@ def run_study(args: argparse.Namespace) -> None:
         print("\n[SUCCESS] Power Grid Analysis study completed successfully!")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Entry point for pdn-study CLI."""
     run_study(parse_args())
+
+
+if __name__ == "__main__":
+    main()

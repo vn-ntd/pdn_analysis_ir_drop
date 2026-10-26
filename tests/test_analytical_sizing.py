@@ -2,9 +2,9 @@
 Extended unit tests for analytical sizing with new edge case coverage (v1.1.0).
 """
 import unittest
-import math
-from core.technology_specs import TechnologyConfig
+
 from core.analytical_sizing import PDNAnalyticalSizer
+from core.technology_specs import TechnologyConfig
 
 
 class TestAnalyticalSizing(unittest.TestCase):
@@ -155,6 +155,46 @@ class TestAnalyticalSizing(unittest.TestCase):
         )
         self.assertEqual(res["delta_i_peak_a"], 0.0)
         self.assertEqual(res["c_decap_required_nf"], 0.0)
+
+    def test_decap_sizing_default_budget(self):
+        """Verify decap sizing uses default technology dynamic IR budget when None."""
+        res = self.sizer.size_decoupling_capacitance(
+            peak_dynamic_current_a=2.0,
+            average_dc_current_a=1.0,
+            transient_duration_ps=100.0,
+            target_dynamic_drop_v=None,  # triggers line 190 default fallback
+        )
+        self.assertGreater(res["c_decap_required_nf"], 0.0)
+
+    def test_single_end_feed_quadruples_static_drop(self):
+        """
+        Verify that single-ended feed produces 4x the IR drop of both-ends feed
+        for the same physical wire geometry and power load.
+        """
+        layer = self.tech.layers["M8"]
+        drop_both, _ = self.sizer.calculate_stripe_static_ir_drop(
+            layer, width_um=2.0, pitch_um=30.0, span_length_um=100.0,
+            power_density_w_per_mm2=1.0, feed_type="both_ends",
+        )
+        drop_single, _ = self.sizer.calculate_stripe_static_ir_drop(
+            layer, width_um=2.0, pitch_um=30.0, span_length_um=100.0,
+            power_density_w_per_mm2=1.0, feed_type="single_end",
+        )
+        self.assertAlmostEqual(drop_single / drop_both, 4.0, places=6)
+
+    def test_single_end_feed_increases_sizing_width(self):
+        """Verify single_end feed requires greater stripe width for same budget."""
+        res_both = self.sizer.size_power_stripe(
+            layer_name="M8", pitch_um=30.0, span_length_um=100.0,
+            power_density_w_per_mm2=1.0, target_ir_drop_v=0.015,
+            feed_type="both_ends",
+        )
+        res_single = self.sizer.size_power_stripe(
+            layer_name="M8", pitch_um=30.0, span_length_um=100.0,
+            power_density_w_per_mm2=1.0, target_ir_drop_v=0.015,
+            feed_type="single_end",
+        )
+        self.assertGreaterEqual(res_single.recommended_width_um, res_both.recommended_width_um)
 
 
 if __name__ == "__main__":

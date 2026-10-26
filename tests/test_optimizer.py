@@ -2,9 +2,10 @@
 Extended unit tests for PDN Parameter Optimizer and Pareto Explorer (v1.1.0).
 """
 import unittest
-from core.technology_specs import TechnologyConfig
-from core.mna_mesh_solver import GridConfig, PowerHotspot
+
+from core.mna_mesh_solver import GridConfig
 from core.optimizer import PDNOptimizer
+from core.technology_specs import TechnologyConfig
 
 
 class TestOptimizer(unittest.TestCase):

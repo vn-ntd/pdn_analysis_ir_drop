@@ -7,10 +7,10 @@ Fixes applied (v1.1.0):
   - [MOD4] Tailwind CDN updated to official cdn.tailwindcss.com URL.
   - Added --output-dir / --json-path CLI arguments for portability.
 """
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
 
 
 def parse_args() -> argparse.Namespace:
@@ -517,7 +517,7 @@ def generate_dashboard(args: argparse.Namespace = None) -> None:
       const h = canvas.height;
       ctx.clearRect(0, 0, w, h);
 
-      const maxDrop = 25.0;
+      const maxDrop = Math.max(25.0, topo.metrics.max_static_ir_drop_mv * 1.05);
       document.getElementById("maxDropScale").innerText = `Max Drop: ${{topo.metrics.max_static_ir_drop_mv}} mV`;
 
       const cellW = w / (hm.nx - 1);
@@ -544,14 +544,23 @@ def generate_dashboard(args: argparse.Namespace = None) -> None:
         ctx.beginPath(); ctx.moveTo(0, py); ctx.lineTo(w, py); ctx.stroke();
       }}
 
-      const chipSize = hm.x_coords[hm.nx - 1];
-      const scaleX = w / chipSize;
-      const scaleY = h / chipSize;
+      const chipSizeX = hm.x_coords[hm.nx - 1];
+      const chipSizeY = hm.y_coords[hm.ny - 1];
+      const scaleX = w / chipSizeX;
+      const scaleY = h / chipSizeY;
 
-      const hotspotCoords = [
-        {{ name: "Core_ALU", x1: chipSize * 0.25, y1: chipSize * 0.25, x2: chipSize * 0.533, y2: chipSize * 0.533 }},
-        {{ name: "NPU_Cluster", x1: chipSize * 0.633, y1: chipSize * 0.60, x2: chipSize * 0.867, y2: chipSize * 0.833 }},
-      ];
+      const hotspotCoords = (pdnData.floorplan && pdnData.floorplan.hotspots)
+        ? pdnData.floorplan.hotspots.map(hs => ({{
+            name: hs.name,
+            x1: hs.x_min_um,
+            y1: hs.y_min_um,
+            x2: hs.x_max_um,
+            y2: hs.y_max_um,
+          }}))
+        : [
+            {{ name: "Core_ALU", x1: chipSizeX * 0.25, y1: chipSizeY * 0.25, x2: chipSizeX * 0.533, y2: chipSizeY * 0.533 }},
+            {{ name: "NPU_Cluster", x1: chipSizeX * 0.633, y1: chipSizeY * 0.60, x2: chipSizeX * 0.867, y2: chipSizeY * 0.833 }},
+          ];
 
       hotspotCoords.forEach(hs => {{
         const hx = hs.x1 * scaleX;
@@ -568,13 +577,15 @@ def generate_dashboard(args: argparse.Namespace = None) -> None:
         ctx.fillText(hs.name, hx + 4, hy + 14);
       }});
 
-      const bumpPitch = topo.config.bump_pitch_um * scaleX;
-      const bumpOffset = 30 * scaleX;
+      const bumpPitchX = topo.config.bump_pitch_um * scaleX;
+      const bumpPitchY = topo.config.bump_pitch_um * scaleY;
+      const bumpOffsetX = 30 * scaleX;
+      const bumpOffsetY = 30 * scaleY;
       ctx.fillStyle = "#38bdf8";
       ctx.strokeStyle = "#ffffff";
       ctx.lineWidth = 1;
-      for (let bx = bumpOffset; bx < w; bx += bumpPitch) {{
-        for (let by = bumpOffset; by < h; by += bumpPitch) {{
+      for (let bx = bumpOffsetX; bx < w; bx += bumpPitchX) {{
+        for (let by = bumpOffsetY; by < h; by += bumpPitchY) {{
           ctx.beginPath();
           ctx.arc(bx, h - by, 3.5, 0, Math.PI * 2);
           ctx.fill();
@@ -595,9 +606,10 @@ def generate_dashboard(args: argparse.Namespace = None) -> None:
       const hm = topo.heatmap;
       const normX = mouseX / canvas.width;
       const normY = (canvas.height - mouseY) / canvas.height;
-      const chipSize = hm.x_coords[hm.nx - 1];
-      const chipX = normX * chipSize;
-      const chipY = normY * chipSize;
+      const chipSizeX = hm.x_coords[hm.nx - 1];
+      const chipSizeY = hm.y_coords[hm.ny - 1];
+      const chipX = normX * chipSizeX;
+      const chipY = normY * chipSizeY;
 
       const ix = Math.min(hm.nx - 1, Math.max(0, Math.round(normX * (hm.nx - 1))));
       const iy = Math.min(hm.ny - 1, Math.max(0, Math.round(normY * (hm.ny - 1))));
@@ -725,5 +737,10 @@ def generate_dashboard(args: argparse.Namespace = None) -> None:
     print(f"[SUCCESS] Dashboard generated at: {html_target}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """Entry point for pdn-dashboard CLI."""
     generate_dashboard(parse_args())
+
+
+if __name__ == "__main__":
+    main()

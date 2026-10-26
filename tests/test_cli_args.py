@@ -2,9 +2,9 @@
 Test for CLI argument parsing in run_pdn_study.py (v1.1.0).
 Covers FIX M7: argparse integration for chip-size, background-power, etc.
 """
-import unittest
-import sys
 import os
+import sys
+import unittest
 
 # Ensure project root in path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))

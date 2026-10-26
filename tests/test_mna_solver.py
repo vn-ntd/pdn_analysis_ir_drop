@@ -9,12 +9,15 @@ New tests added in v1.1.0:
   - test_zero_bump_raises_or_produces_large_drop: edge case with no bumps in window
   - test_dynamic_bump_precompute_consistency: pre-computed b_bump gives same result as inline
   - test_grid_linspace_exact_bounds: checks x_coords/y_coords start/end at 0 and chip_size
+  - test_hotspot_extra_decap_allocation: verifies local decap reduces transient overshoot
+  - test_bump_via_array_resistance: checks via array modeling from bump to top metal
 """
 import unittest
+
 import numpy as np
-import scipy.sparse as sp
+
+from core.mna_mesh_solver import GridConfig, MNAPowerGridSolver, PowerHotspot
 from core.technology_specs import TechnologyConfig
-from core.mna_mesh_solver import MNAPowerGridSolver, GridConfig, PowerHotspot
 
 
 class TestMNAMeshSolver(unittest.TestCase):
@@ -46,6 +49,20 @@ class TestMNAMeshSolver(unittest.TestCase):
         self.assertEqual(len(self.solver.x_coords), 11)  # 0 to 300 by 30, 11 points
         self.assertEqual(len(self.solver.y_coords), 11)
         self.assertEqual(self.solver.num_nodes, 121)
+
+    def test_grid_config_validation_invalid_dimensions(self):
+        """Verify GridConfig raises ValueError when dimensions are non-positive."""
+        with self.assertRaises(ValueError):
+            GridConfig(chip_width_um=-100.0)
+        with self.assertRaises(ValueError):
+            GridConfig(chip_height_um=0.0)
+
+    def test_grid_config_validation_width_exceeds_pitch(self):
+        """Verify GridConfig raises ValueError when width >= pitch."""
+        with self.assertRaises(ValueError):
+            GridConfig(h_width_um=50.0, h_pitch_um=30.0)
+        with self.assertRaises(ValueError):
+            GridConfig(v_width_um=40.0, v_pitch_um=40.0)
 
     def test_mna_conductance_matrix_properties(self):
         """Verify MNA G matrix is sparse, square, diagonally dominant, and non-empty."""
@@ -80,12 +97,15 @@ class TestMNAMeshSolver(unittest.TestCase):
         """Verify transient Backward Euler simulation stability and overshoot behavior."""
         dyn_res = self.solver.solve_dynamic(duration_ps=400.0, dt_ps=10.0)
 
-        self.assertEqual(len(dyn_res.time_ps), 40)
-        self.assertEqual(len(dyn_res.worst_node_ir_drop_mv), 40)
+        # 0 to 400 ps with dt=10 ps has 41 points (inclusive bounds)
+        self.assertEqual(len(dyn_res.time_ps), 41)
+        self.assertEqual(len(dyn_res.worst_node_ir_drop_mv), 41)
+        self.assertAlmostEqual(dyn_res.time_ps[1] - dyn_res.time_ps[0], 10.0, places=6)
         self.assertGreaterEqual(
             dyn_res.peak_dynamic_ir_drop_mv, dyn_res.peak_static_ir_drop_mv - 1e-4
         )
         self.assertGreaterEqual(dyn_res.dynamic_overshoot_mv, 0.0)
+        self.assertGreater(dyn_res.decap_charge_supplied_pc, 0.0)
 
     def test_branch_current_and_em(self):
         """Verify branch current density calculation produces non-negative values."""
@@ -96,7 +116,7 @@ class TestMNAMeshSolver(unittest.TestCase):
         self.assertGreater(res.max_current_density_ma_per_um2, 0.0)
 
     # ------------------------------------------------------------------ #
-    # New tests for fixed bugs (v1.1.0)                                   #
+    # New tests for fixed bugs and enhancements                           #
     # ------------------------------------------------------------------ #
 
     def test_boundary_correction_exact(self):
@@ -158,7 +178,6 @@ class TestMNAMeshSolver(unittest.TestCase):
         j_hs = (2.5 / vdd) / 1.0e6
 
         # Manually compute expected for a known interior hotspot node
-        # Find first interior hotspot node
         for j, y in enumerate(solver.y_coords):
             for i, x in enumerate(solver.x_coords):
                 if (20.0 <= x <= 60.0 and 20.0 <= y <= 60.0 and
@@ -168,7 +187,7 @@ class TestMNAMeshSolver(unittest.TestCase):
                         currents[j, i], expected, places=10,
                         msg=f"Interior hotspot node ({i},{j}) mismatch"
                     )
-                    return  # One interior hotspot node confirmed is enough
+                    return
 
     def test_branch_current_vectorized_shape_and_values(self):
         """
@@ -192,7 +211,7 @@ class TestMNAMeshSolver(unittest.TestCase):
                     res.current_density_h[j, i], expected_j, places=8,
                     msg=f"j_h mismatch at ({i},{j})"
                 )
-            break  # Check first row only for speed
+            break
 
     def test_dynamic_surge_center_within_window(self):
         """
@@ -247,6 +266,86 @@ class TestMNAMeshSolver(unittest.TestCase):
             dyn_with_hs.peak_dynamic_ir_drop_mv,
             dyn_no_hs.peak_dynamic_ir_drop_mv,
             "Hotspot should increase peak dynamic IR drop",
+        )
+
+    def test_hotspot_extra_decap_allocation_reduces_dynamic_drop(self):
+        """
+        Verify that adding hotspot_extra_decap_nf increases local capacitance
+        and effectively reduces dynamic transient IR-drop overshoot.
+        """
+        cfg_with_extra = GridConfig(
+            chip_width_um=300.0,
+            chip_height_um=300.0,
+            h_width_um=3.0,
+            h_pitch_um=30.0,
+            v_width_um=3.0,
+            v_pitch_um=30.0,
+            bump_pitch_um=100.0,
+            background_power_w_per_mm2=1.0,
+            hotspots=[
+                PowerHotspot("Core", 100.0, 200.0, 100.0, 200.0, power_density_w_per_mm2=3.0)
+            ],
+            uniform_decap_nf_per_mm2=10.0,
+            hotspot_extra_decap_nf=10.0,
+        )
+        solver_extra = MNAPowerGridSolver(self.tech, cfg_with_extra)
+        dyn_extra = solver_extra.solve_dynamic(duration_ps=400.0, dt_ps=10.0)
+        dyn_base = self.solver.solve_dynamic(duration_ps=400.0, dt_ps=10.0)
+
+        self.assertLess(
+            dyn_extra.peak_dynamic_ir_drop_mv,
+            dyn_base.peak_dynamic_ir_drop_mv,
+            "Extra hotspot decap must reduce peak dynamic IR drop",
+        )
+        self.assertLess(
+            dyn_extra.dynamic_overshoot_mv,
+            dyn_base.dynamic_overshoot_mv,
+            "Extra hotspot decap must reduce transient overshoot",
+        )
+
+    def test_bump_via_array_resistance_increases_effective_resistance(self):
+        """
+        Verify that configuring bump_num_via_cuts increases effective bump resistance
+        by R_cut / num_cuts.
+        """
+        # Via8 is 0.25 Ohm / cut. With 25 cuts: 0.25 / 25 = 0.010 Ohm = 10 mOhm
+        cfg_via = GridConfig(
+            chip_width_um=300.0,
+            chip_height_um=300.0,
+            bump_resistance_ohm=0.020,
+            bump_via_layer="Via8",
+            bump_num_via_cuts=25,
+        )
+        solver_via = MNAPowerGridSolver(self.tech, cfg_via)
+        self.assertAlmostEqual(solver_via.effective_bump_resistance_ohm, 0.030, places=6)
+
+    def test_via_starvation_increases_static_ir_drop(self):
+        """
+        Verify that fewer via cuts (via starvation / higher bump contact resistance)
+        causes higher static IR drop.
+        """
+        cfg_few_vias = GridConfig(
+            chip_width_um=300.0,
+            chip_height_um=300.0,
+            bump_via_layer="Via8",
+            bump_num_via_cuts=4,   # 0.25 / 4 = 62.5 mOhm extra
+        )
+        cfg_many_vias = GridConfig(
+            chip_width_um=300.0,
+            chip_height_um=300.0,
+            bump_via_layer="Via8",
+            bump_num_via_cuts=100,  # 0.25 / 100 = 2.5 mOhm extra
+        )
+        sol_few = MNAPowerGridSolver(self.tech, cfg_few_vias)
+        sol_many = MNAPowerGridSolver(self.tech, cfg_many_vias)
+
+        res_few = sol_few.solve_static()
+        res_many = sol_many.solve_static()
+
+        self.assertGreater(
+            res_few.max_ir_drop_mv,
+            res_many.max_ir_drop_mv,
+            "Via starvation must lead to higher static IR drop",
         )
 
 
